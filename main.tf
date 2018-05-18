@@ -186,7 +186,11 @@ resource "aws_ecs_task_definition" "task" {
     "environment": [{
       "name": "APACHE_HTTP_PORT_NUMBER",
       "value": "${var.container_port}"
-    }],
+    },
+    {
+      "name": "SERVICE_LOOKUP_NAME",
+      "value": "${module.service_label.id}"
+      }],
     "portMappings": [
       {
         "containerPort": ${var.container_port}
