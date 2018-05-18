@@ -389,6 +389,74 @@ resource "aws_service_discovery_service" "service" {
   }
 }
 
+### Create the Task Role for the Container Task to run as.
+resource "aws_iam_role" "task_role" {
+  name = "${module.task_label.id}_role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy" "execution_role_policy" {
+  name = "${module.task_label.id}_role_policy"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "elasticloadbalancing:Describe*",
+        "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+        "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+        "ec2:Describe*",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams"
+      ],
+      "Resource": [
+          "arn:aws:logs:*:*:*"
+      ]
+    }
+  ]
+}
+EOF
+
+  role = "${aws_iam_role.task_role.id}"
+}
+
+
 output "aws_cloudwatch_log_group" {
   value = "${aws_cloudwatch_log_group.main.name}"
 }
