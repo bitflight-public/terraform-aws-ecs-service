@@ -87,7 +87,7 @@ variable "region" {
   default = "us-east-1"
 }
 
-variable "task_role_arn" {}
+#variable "task_role_arn" {}
 
 variable "launch_type" {
   default = "FARGATE"
@@ -171,7 +171,7 @@ resource "aws_ecs_task_definition" "task" {
   family                   = "${module.task_label.id}"
   network_mode             = "${var.network_mode}"
   requires_compatibilities = ["${var.requires_compatibilities}"]
-  execution_role_arn       = "${var.task_role_arn}"
+  execution_role_arn       = "${aws_iam_role.task_role.arn}"
   cpu                      = "${var.container_cpu}"
   memory                   = "${var.container_memory}"
 
