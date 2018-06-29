@@ -134,21 +134,19 @@ resource "aws_ecs_service" "default" {
   deployment_minimum_healthy_percent = "${var.deployment_minimum_healthy_percent}"
   launch_type                        = "${var.launch_type}"
 
-  #iam_role        = "${var.ecs_service_role_arn}"
-
-  # placement_strategy {
-  #   type  = "spread"
-  #   field = "attribute:ecs.availability-zone"
-  # }
   network_configuration {
     security_groups = ["${var.security_group_ids}"]
     subnets         = ["${var.container_subnets}"]
   }
-  load_balancer {
+
+  load_balancer = [{
     target_group_arn = "${aws_alb_target_group.main.id}"
     container_name   = "${module.task_label.id}"
     container_port   = "${var.container_port}"
-  }
+  }]
+
+  #["${local.load_balancer["${var.container_port != "" ? "with_alb" : "without_alb"}"]}"]
+
   lifecycle {
     #create_before_destroy = true
     ignore_changes = ["desired_count"]
@@ -159,6 +157,98 @@ resource "aws_ecs_service" "default" {
   depends_on = [
     "aws_alb_listener.front_end",
   ]
+}
+
+locals {
+  cluster_name = "${element(split("/", var.cluster_id), 1)}"
+}
+
+resource "aws_appautoscaling_target" "ecs_target" {
+  max_capacity       = 6
+  min_capacity       = 2
+  resource_id        = "service/${local.cluster_name}/${aws_ecs_service.default.name}"
+  role_arn           = "${var.ecs_service_role_arn}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "ecs_policy_scale_down" {
+  name               = "scale-down-${module.service_label.id}"
+  policy_type        = "StepScaling"
+  resource_id        = "service/${local.cluster_name}/${aws_ecs_service.default.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+
+  step_scaling_policy_configuration {
+    adjustment_type         = "ChangeInCapacity"
+    cooldown                = 60
+    metric_aggregation_type = "Average"
+
+    step_adjustment {
+      metric_interval_upper_bound = 0
+      scaling_adjustment          = -1
+    }
+  }
+
+  depends_on = ["aws_appautoscaling_target.ecs_target"]
+}
+
+resource "aws_appautoscaling_policy" "ecs_policy_scale_up" {
+  name               = "scale-up-${module.service_label.id}"
+  policy_type        = "StepScaling"
+  resource_id        = "service/${local.cluster_name}/${aws_ecs_service.default.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+
+  step_scaling_policy_configuration {
+    adjustment_type         = "ChangeInCapacity"
+    cooldown                = 60
+    metric_aggregation_type = "Average"
+
+    step_adjustment {
+      metric_interval_lower_bound = 0
+      scaling_adjustment          = 1
+    }
+  }
+
+  depends_on = ["aws_appautoscaling_target.ecs_target"]
+}
+
+### ECS AutoScaling Alarm
+resource "aws_cloudwatch_metric_alarm" "service_high" {
+  alarm_name          = "${module.service_label.id}-CPU-Utilization-High-30"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = "60"
+  statistic           = "Average"
+  threshold           = "30"
+
+  dimensions {
+    ClusterName = "${local.cluster_name}"
+    ServiceName = "${aws_ecs_service.default.name}"
+  }
+
+  alarm_actions = ["${aws_appautoscaling_policy.ecs_policy_scale_up.arn}"]
+}
+
+resource "aws_cloudwatch_metric_alarm" "service_low" {
+  alarm_name          = "${module.service_label.id}-CPU-Utilization-Low-5"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = "60"
+  statistic           = "Average"
+  threshold           = "5"
+
+  dimensions {
+    ClusterName = "${local.cluster_name}"
+    ServiceName = "${aws_ecs_service.default.name}"
+  }
+
+  alarm_actions = ["${aws_appautoscaling_policy.ecs_policy_scale_down.arn}"]
 }
 
 resource "aws_cloudwatch_log_group" "main" {
@@ -305,7 +395,6 @@ resource "aws_alb_listener" "front_end_ssl" {
     target_group_arn = "${aws_alb_target_group.main.id}"
     type             = "forward"
   }
-
 }
 
 ## No SSL
@@ -459,7 +548,6 @@ EOF
 
   role = "${aws_iam_role.task_role.id}"
 }
-
 
 output "aws_cloudwatch_log_group" {
   value = "${aws_cloudwatch_log_group.main.name}"
